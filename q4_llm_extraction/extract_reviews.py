@@ -6,6 +6,7 @@
 """
 
 import os
+import sys # 👈 引入 sys 以便控制退出码
 import re
 import json
 import time
@@ -25,6 +26,7 @@ BASE_DIR = os.path.dirname(SCRIPT_DIR)
 REVIEWS_CSV = os.path.join(BASE_DIR, "data", "olist", "olist_order_reviews_dataset.csv")
 PROMPT_FILE = os.path.join(SCRIPT_DIR, "prompt_template.txt")
 OUTPUT_JSON = os.path.join(SCRIPT_DIR, "extracted_issues.json")
+FULL_BACKUP_JSON = os.path.join(SCRIPT_DIR, "extracted_issues_full_backup.json") # 👈 新增全量备份路径
 FAILED_TXT = os.path.join(SCRIPT_DIR, "failed_reviews.txt")
 
 env_path = os.path.join(BASE_DIR, '.env')
@@ -32,7 +34,6 @@ load_dotenv(dotenv_path=env_path, override=True)
 API_KEY = os.getenv("OPENAI_API_KEY")
 API_URL = "https://api.deepseek.com/chat/completions" 
 
-# 🚨 提速核心：直接把并发数拉满到 20
 MAX_WORKERS = 20
 
 if not API_KEY:
@@ -97,6 +98,14 @@ def process_single_review(row, prompt_template):
 def main():
     start_time = time.time()
     
+    # 👇 ==========================================
+    # 🌟 终极跳过逻辑：如果昨天跑完的全量备份还在，直接秒退！
+    # ==========================================
+    if os.path.exists(FULL_BACKUP_JSON):
+        print("✅ [SKIP] 检测到全量历史备份 (extracted_issues_full_backup.json) 已存在！")
+        print("⏭️ 为了保证 0-1 演示的极速流畅并节省 API 成本，自动跳过 LLM 抽取模块。")
+        sys.exit(0) # 正常退出，告诉父进程 run_all.py 这个模块执行成功
+
     with open(PROMPT_FILE, "r", encoding="utf-8") as f:
         prompt_template = f.read()
 
@@ -123,14 +132,14 @@ def main():
     
     if total_todo == 0:
         print("🎉 所有数据都已处理完毕，无需运行！")
-        return
+        sys.exit(0) # 正常退出
 
     print(f"待处理数据: {total_todo} 条 | 并发线程数: {MAX_WORKERS}\n")
     
     total_tokens_used = 0
     success_count = 0
     
-    # 🚀 多线程并发执行 (不使用 with 语句，改为手动管理，以便优雅处理 Ctrl+C)
+    # 🚀 多线程并发执行
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS)
     futures = [executor.submit(process_single_review, row, prompt_template) for _, row in df_todo.iterrows()]
     
@@ -152,15 +161,13 @@ def main():
                     json.dump(results, f_out, ensure_ascii=False, indent=2)
                     
     except KeyboardInterrupt:
-        # 拦截 Ctrl+C，优雅退出
         print("\n⚠️ 检测到人工中断 (Ctrl+C)，正在保存当前进度并强制退出...")
         executor.shutdown(wait=False, cancel_futures=True)
         
-        # 退出前最后保存一次
         with open(OUTPUT_JSON, "w", encoding="utf-8") as f_out:
             json.dump(results, f_out, ensure_ascii=False, indent=2)
         print(f"✅ 数据已安全保存。下次运行将自动跳过 {len(results)} 条历史记录。")
-        return
+        sys.exit(0) # 👈 关键修复：中断后正常退出，不让 run_all.py 抛异常
 
     executor.shutdown(wait=True)
     
