@@ -19,13 +19,28 @@
 ## 2. AI 的回答
 
 ```
-你可以使用 Pandas 遍历数据。以下是代码示例：
-for idx, row in returns_df.iterrows():
-    valid_sales = sales_df[(sales_df['Customer ID'] == row['Customer ID']) & 
-                           (sales_df['StockCode'] == row['StockCode']) & 
-                           (sales_df['InvoiceDate'] < row['InvoiceDate'])]
-    if not valid_sales.empty:
-        matched_invoice = valid_sales.sort_values('InvoiceDate').iloc[-1]['Invoice']
+你可以使用 Pandas 遍历数据来寻找最近的一笔正向销售。以下是代码示例：
+
+def match_returns_iterrows(df):
+returns = df[df['Invoice'].astype(str).str.startswith('C')]
+sales = df[~df['Invoice'].astype(str).str.startswith('C')]
+results = []
+
+for idx, row in returns.iterrows():
+
+筛选同客户、同商品、时间早于退货时间的正向销售
+valid_sales = sales[
+(sales['Customer ID'] == row['Customer ID']) &
+(sales['StockCode'] == row['StockCode']) &
+(sales['InvoiceDate'] < row['InvoiceDate'])
+]
+if not valid_sales.empty:
+
+找时间最近的一条
+matched_invoice = valid_sales.sort_values('InvoiceDate').iloc[-1]['Invoice']
+results.append({'return_invoice': row['Invoice'], 'matched_original': matched_invoice})
+
+return pd.DataFrame(results)
 ```
 
 ---
